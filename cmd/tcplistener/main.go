@@ -50,6 +50,9 @@ func readLine(conn net.Conn, c chan string) {
 		n, err := conn.Read(buf)
 		if err != nil {
 			if err == io.EOF {
+				if len(line) > 0 {
+					c <- line
+				}
 				fmt.Println("Connection Closed")
 				close(c)
 				conn.Close()
