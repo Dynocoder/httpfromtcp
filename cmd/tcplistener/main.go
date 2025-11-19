@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"httpfromtcp/internal/request"
 	"log"
 	"net"
-	"strings"
 )
 
 func main() {
@@ -24,55 +23,16 @@ func main() {
 		}
 		fmt.Println("Connection Established")
 
-		c := getLinesChannel(conn)
-
-		for line := range c {
-			fmt.Println(line)
-		}
-
-	}
-}
-
-func getLinesChannel(conn net.Conn) <-chan string {
-
-	c := make(chan string)
-
-	go readLine(conn, c)
-
-	return c
-
-}
-
-func readLine(conn net.Conn, c chan string) {
-	buf := make([]byte, 8)
-	line := ""
-	for {
-		n, err := conn.Read(buf)
+		request, err := request.RequestFromReader(conn)
 		if err != nil {
-			if err == io.EOF {
-				if len(line) > 0 {
-					c <- line
-				}
-				fmt.Println("Connection Closed")
-				close(c)
-				conn.Close()
-				return
-			} else {
-				fmt.Println("Error", err)
-				close(c)
-				return
-			}
+			fmt.Println(err)
+			return
 		}
-		data := string(buf[:n])
 
-		parts := strings.Split(data, "\n")
+		fmt.Println("Request Line: ")
+		fmt.Printf("Method: %s\n", request.RequestLine.Method)
+		fmt.Printf("Target: %s\n", request.RequestLine.RequestTarget)
+		fmt.Printf("Version: %s\n", request.RequestLine.HttpVersion)
 
-		if len(parts) == 1 {
-			line += parts[0]
-		} else {
-			line += parts[0]
-			c <- line
-			line = parts[1]
-		}
 	}
 }

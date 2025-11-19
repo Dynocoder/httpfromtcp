@@ -14,6 +14,7 @@ const (
 	initialized ParserState = iota
 	done
 )
+const crlf = "\r\n"
 const bufferSize = 8
 
 type Request struct {
@@ -71,10 +72,11 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		if n > 0 {
 			readToIndex += n
 		}
-		if err == io.EOF {
-			break
-		}
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				request.ParserState = done
+				break
+			}
 			return nil, err
 		}
 
@@ -94,7 +96,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 func parseRequestLine(data []byte) (*RequestLine, int, error) {
 
-	idx := bytes.Index(data, []byte("\r\n"))
+	idx := bytes.Index(data, []byte(crlf))
 
 	if idx == -1 {
 		return &RequestLine{}, 0, nil
