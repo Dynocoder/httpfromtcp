@@ -15,7 +15,7 @@ func TestHeadersParse(t *testing.T) {
 	n, done, err := headers.Parse(data)
 	require.NoError(t, err)
 	require.NotNil(t, headers)
-	assert.Equal(t, "localhost:42069", headers["Host"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
 	assert.Equal(t, 23, n)
 	assert.True(t, done)
 
@@ -28,15 +28,14 @@ func TestHeadersParse(t *testing.T) {
 	assert.False(t, done)
 
 	// Test: Valid 2 headers with existing headers
-	headers = Headers{
-		"Existing": "Header",
-	}
+	headers = NewHeaders()
+	headers.Set("Existing", "Header")
 	data = []byte("Host: localhost:42069\r\n\r\n")
 	n, done, err = headers.Parse(data)
 	require.NoError(t, err)
 	require.NotNil(t, headers)
-	assert.Equal(t, "localhost:42069", headers["Host"])
-	assert.Equal(t, "Header", headers["Existing"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "Header", headers.Get("Existing"))
 	assert.Equal(t, 23, n)
 	assert.True(t, done)
 
@@ -46,14 +45,32 @@ func TestHeadersParse(t *testing.T) {
 	n, done, err = headers.Parse(data)
 	require.NoError(t, err)
 	require.NotNil(t, headers)
-	assert.Equal(t, "localhost:42069", headers["Host"])
-	assert.Equal(t, "text/html", headers["Content-Type"])
+	assert.Equal(t, "localhost:42069", headers.Get("Host"))
+	assert.Equal(t, "text/html", headers.Get("Content-Type"))
 	assert.Equal(t, 48, n)
 	assert.False(t, done)
 
 	// Test:  Invalid spacing header
 	headers = NewHeaders()
 	data = []byte("Host : localhost:42069\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.Error(t, err)
+	assert.Equal(t, 0, n)
+	assert.False(t, done)
+
+	// Test: header case sensitivity
+	headers = NewHeaders()
+	data = []byte("Host: localhost:42069\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, headers)
+	assert.Equal(t, "localhost:42069", headers.Get("host"))
+	assert.Equal(t, 23, n)
+	assert.True(t, done)
+
+	// Test: Invalid header format
+	headers = NewHeaders()
+	data = []byte("H©st: localhost:42069\r\n\r\n")
 	n, done, err = headers.Parse(data)
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
