@@ -3,6 +3,8 @@ package request
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"httpfromtcp/internal/headers"
 	"io"
 	"strings"
 	"unicode"
@@ -12,35 +14,56 @@ type ParserState int
 
 const (
 	initialized ParserState = iota
-	done
+	requestStateParsingHeaders
+	requestStateDone
 )
-const crlf = "\r\n"
+const rn = "\r\n"
 const bufferSize = 8
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	ParserState ParserState
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.ParserState == initialized {
+	switch r.ParserState {
+	case initialized:
 		line, n, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
-		} else if n == 0 {
-			return 0, nil // did not receive CRLF, keep going
+		}
+
+		// Haven't received Request Line CLRF yet, keep going
+		if n == 0 {
+
+			return 0, nil
 		} else if n > 0 {
 			r.RequestLine = *line
-			r.ParserState = done
+			r.ParserState = requestStateParsingHeaders
+			return n + len(rn), nil
+		}
+
+	case requestStateParsingHeaders:
+		// fmt.Printf("before parse: %#v (nil=%v)\n", r.Headers, r.Headers == nil)
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+
+		if done {
+			r.ParserState = requestStateDone
 			return n, nil
 		}
 
-	} else if r.ParserState == done {
-		return 0, errors.New("error: trying to read data in done state")
-	} else {
-		return 0, errors.New("error: Unknown state")
-	}
+		return n, nil
 
+		// fmt.Printf("after parse: %#v (nil=%v)\n", r.Headers, r.Headers == nil)
+	case requestStateDone:
+		return 0, fmt.Errorf("Error: Trying to read data in done state")
+	default:
+		return 0, fmt.Errorf("Error: Unknown State")
+	}
 	return 0, nil
 }
 
@@ -55,11 +78,12 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 	request := &Request{
 		ParserState: initialized,
+		Headers:     map[string]string{},
 	}
 
 	readToIndex := 0
 
-	for request.ParserState != done {
+	for request.ParserState != requestStateDone {
 
 		// if buffer is full, grow it
 		if readToIndex == cap(buf) {
@@ -74,13 +98,14 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				request.ParserState = done
+				request.ParserState = requestStateDone
 				break
 			}
 			return nil, err
 		}
 
-		consumed, perr := request.parse(buf)
+		//NOTE: we explicitly pass to [:readToIndex] because by default it passes only up to len(buf)
+		consumed, perr := request.parse(buf[:readToIndex])
 		if perr != nil {
 			return nil, perr
 		}
@@ -94,9 +119,13 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	return request, nil
 }
 
+/**
+ * Parses the request line from the given data.
+ * Returns the parsed RequestLine, number of bytes consumed, and error if any.
+ */
 func parseRequestLine(data []byte) (*RequestLine, int, error) {
 
-	idx := bytes.Index(data, []byte(crlf))
+	idx := bytes.Index(data, []byte(rn))
 
 	if idx == -1 {
 		return &RequestLine{}, 0, nil

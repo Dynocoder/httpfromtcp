@@ -29,6 +29,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		// string end at the start indicates empty line after header (end of headers)
 		if idx == 0 {
 			doneState = true
+			read += len(rn)
 			break
 		}
 
@@ -40,6 +41,15 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		}
 
 		read += idx + len(rn)
+
+		// Header already exists
+		// RFC 9110, Section 5.2:
+		// https://datatracker.ietf.org/doc/html/rfc9110#name-field-lines-and-combined-fi
+		existing := h.Get(name)
+		if len(existing) != 0 {
+			value = fmt.Sprintf("%s, %s", existing, value)
+		}
+
 		h.Set(name, value)
 
 	}

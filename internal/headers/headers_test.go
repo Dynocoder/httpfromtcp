@@ -16,7 +16,7 @@ func TestHeadersParse(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, headers)
 	assert.Equal(t, "localhost:42069", headers.Get("Host"))
-	assert.Equal(t, 23, n)
+	assert.Equal(t, 25, n)
 	assert.True(t, done)
 
 	// Test: Invalid spacing header
@@ -36,7 +36,7 @@ func TestHeadersParse(t *testing.T) {
 	require.NotNil(t, headers)
 	assert.Equal(t, "localhost:42069", headers.Get("Host"))
 	assert.Equal(t, "Header", headers.Get("Existing"))
-	assert.Equal(t, 23, n)
+	assert.Equal(t, 25, n)
 	assert.True(t, done)
 
 	// Test: Valid incomplete headers
@@ -65,7 +65,7 @@ func TestHeadersParse(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, headers)
 	assert.Equal(t, "localhost:42069", headers.Get("host"))
-	assert.Equal(t, 23, n)
+	assert.Equal(t, 25, n)
 	assert.True(t, done)
 
 	// Test: Invalid header format
@@ -76,4 +76,13 @@ func TestHeadersParse(t *testing.T) {
 	assert.Equal(t, 0, n)
 	assert.False(t, done)
 
+	// Test: Multiple values for same header
+	headers = NewHeaders()
+	data = []byte("Set-Cookie: id=123\r\nSet-Cookie: token=abc\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, headers)
+	assert.Equal(t, "id=123, token=abc", headers.Get("Set-Cookie"))
+	assert.Equal(t, 45, n)
+	assert.True(t, done)
 }
