@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"httpfromtcp/internal/headers"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -15,6 +16,7 @@ type ParserState int
 const (
 	initialized ParserState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 const rn = "\r\n"
@@ -24,6 +26,7 @@ type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
 	ParserState ParserState
+	Body        []byte
 }
 
 func (r *Request) parse(data []byte) (int, error) {
@@ -45,7 +48,6 @@ func (r *Request) parse(data []byte) (int, error) {
 		}
 
 	case requestStateParsingHeaders:
-		// fmt.Printf("before parse: %#v (nil=%v)\n", r.Headers, r.Headers == nil)
 		n, done, err := r.Headers.Parse(data)
 		if err != nil {
 			return 0, err
@@ -53,18 +55,67 @@ func (r *Request) parse(data []byte) (int, error) {
 
 		if done {
 			r.ParserState = requestStateDone
+			contentLengthStr := r.Headers.Get("content-length")
+			contentLength, err := strconv.Atoi(contentLengthStr)
+			if err != nil {
+				return n, nil
+			}
+
+			if contentLength > 0 {
+				r.ParserState = requestStateParsingBody
+			}
 			return n, nil
 		}
 
 		return n, nil
 
-		// fmt.Printf("after parse: %#v (nil=%v)\n", r.Headers, r.Headers == nil)
+	case requestStateParsingBody:
+		return r.parseRequestBody(data)
 	case requestStateDone:
 		return 0, fmt.Errorf("Error: Trying to read data in done state")
 	default:
 		return 0, fmt.Errorf("Error: Unknown State")
 	}
 	return 0, nil
+}
+
+func (r *Request) parseRequestBody(data []byte) (int, error) {
+	contentLengthStr := r.Headers.Get("content-length")
+
+	// NOTE: We assume that if no content-length was provided, there is no body.
+	// RFC9110 defines this requirement: https://datatracker.ietf.org/doc/html/rfc9110#section-8.6
+	// However, RFC also says that "SHOULD" is more of a "RECOMMENDED" and that there can be some
+	// very specific scenarios when this may not happen.
+	// RFC: https://datatracker.ietf.org/doc/html/rfc2119#section-3
+	if len(contentLengthStr) == 0 {
+		r.ParserState = requestStateDone
+		return 0, nil
+	}
+
+	bodyLength, err := strconv.Atoi(contentLengthStr)
+	if err != nil {
+		return 0, err
+	}
+
+	if r.Body == nil {
+		r.Body = make([]byte, 0, bodyLength)
+	}
+
+	effectiveLength := bodyLength - len(r.Body)
+
+	if effectiveLength > len(data) {
+		r.Body = append(r.Body, data...)
+		return len(data), nil
+	}
+
+	r.Body = append(r.Body, data[:effectiveLength]...)
+
+	if len(r.Body) != bodyLength {
+		return len(data[:effectiveLength]), fmt.Errorf("Error: Incomplete body")
+	}
+
+	r.ParserState = requestStateDone
+	return len(data[:effectiveLength]), nil
 }
 
 type RequestLine struct {
@@ -98,13 +149,20 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				request.ParserState = requestStateDone
-				break
+				switch request.ParserState {
+				case requestStateParsingHeaders:
+					return request, fmt.Errorf("Error: Incomplete request, missing headers")
+				case requestStateParsingBody:
+					return request, fmt.Errorf("Error: Incomplete request, incomplete body")
+				default:
+					return request, fmt.Errorf("Error: Incomplete request")
+				}
 			}
 			return nil, err
 		}
 
 		//NOTE: we explicitly pass to [:readToIndex] because by default it passes only up to len(buf)
+		// so going forward we can assume we are receiving the full slice and not just up to len(buf)
 		consumed, perr := request.parse(buf[:readToIndex])
 		if perr != nil {
 			return nil, perr
