@@ -45,6 +45,7 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		// Header already exists
 		// RFC 9110, Section 5.2:
 		// https://datatracker.ietf.org/doc/html/rfc9110#name-field-lines-and-combined-fi
+		// TODO: move to Set()? like?
 		existing := h.Get(name)
 		if len(existing) != 0 {
 			value = fmt.Sprintf("%s, %s", existing, value)
@@ -100,6 +101,10 @@ func isValidToken(name []byte) bool {
 
 func (h Headers) Get(name string) string {
 	return h[strings.ToLower(name)]
+}
+
+func (h Headers) Replace(name string, value string) {
+	h[strings.ToLower(name)] = value
 }
 
 func (h Headers) Set(name string, value string) {
