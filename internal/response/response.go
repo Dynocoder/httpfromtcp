@@ -15,7 +15,33 @@ const (
 	StatusInternalServerError StatusCode = 500
 )
 
-func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
+type WriterState int
+
+const (
+	WriterStateWaiting WriterState = iota
+	WriterStateWrittenStatusLine
+	WriterStateWrittenHeaders
+	WriterStateWrittenBody
+)
+
+type Writer struct {
+	io.Writer
+	WriterState
+}
+
+func NewWriter(writer io.Writer) *Writer {
+	return &Writer{Writer: writer, WriterState: WriterStateWaiting}
+}
+
+func (w *Writer) Write(data []byte) (int, error) {
+	return w.Writer.Write(data)
+}
+
+func (w *Writer) WriteStatusLine(statusCode StatusCode) error {
+
+	if w.WriterState != WriterStateWaiting {
+		return fmt.Errorf("Error: writing status line in wrong state: %v", w.WriterState)
+	}
 
 	out := []byte("")
 	switch statusCode {
@@ -30,7 +56,59 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 	}
 
 	_, err := w.Write(out)
-	return err
+	if err != nil {
+		return err
+	}
+
+	w.WriterState = WriterStateWrittenStatusLine
+
+	return nil
+}
+
+func (w *Writer) WriteHeaders(headers *headers.Headers) error {
+
+	if w.WriterState != WriterStateWrittenStatusLine {
+		return fmt.Errorf("Error: writing headers in wrong state: %v", w.WriterState)
+	}
+
+	h := []byte{}
+	for k, v := range *headers {
+		h = fmt.Appendf(h, "%s: %s\r\n", k, v)
+	}
+	h = fmt.Appendf(h, "\r\n")
+	_, err := w.Write(h)
+	if err != nil {
+		return err
+	}
+
+	w.WriterState = WriterStateWrittenHeaders
+
+	return nil
+}
+
+func (w *Writer) WriteBody(p []byte) (int, error) {
+
+	if w.WriterState != WriterStateWrittenHeaders {
+		return 0, fmt.Errorf("Error: writing headers in wrong state: %v", w.WriterState)
+	}
+
+	n, err := w.Writer.Write(p)
+	if err != nil {
+		return 0, err
+	}
+
+	w.WriterState = WriterStateWrittenBody
+
+	return n, nil
+
+}
+
+// Writes to the Writer an HTTP response.
+// The method expects WriterState to be `WriterStateWaiting`.
+func (w *Writer) ReturnResponse(status StatusCode, h *headers.Headers, p []byte) {
+	w.WriteStatusLine(status)
+	w.WriteHeaders(h)
+	w.WriteBody(p)
 }
 
 func GetDefaultHeaders(contentLen int) *headers.Headers {
@@ -42,15 +120,4 @@ func GetDefaultHeaders(contentLen int) *headers.Headers {
 	h.Set("content-type", "text/plain")
 
 	return &h
-}
-
-func WriteHeaders(w io.Writer, headers *headers.Headers) error {
-
-	h := []byte{}
-	for k, v := range *headers {
-		h = fmt.Appendf(h, "%s: %s\r\n", k, v)
-	}
-	h = fmt.Appendf(h, "\r\n")
-	_, err := w.Write(h)
-	return err
 }

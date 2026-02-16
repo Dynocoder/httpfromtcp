@@ -1,11 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"httpfromtcp/internal/request"
 	"httpfromtcp/internal/response"
-	"io"
 	"log"
 	"net"
 )
@@ -13,7 +11,7 @@ import (
 type Server struct {
 	open     bool
 	listener net.Listener
-	handler  handler
+	handler  Handler
 }
 
 type HandlerError struct {
@@ -21,9 +19,9 @@ type HandlerError struct {
 	Message    string
 }
 
-type handler func(w io.Writer, req *request.Request) *HandlerError
+type Handler func(w *response.Writer, req *request.Request)
 
-func Serve(port uint16, handler handler) (*Server, error) {
+func Serve(port uint16, handler Handler) (*Server, error) {
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -41,7 +39,7 @@ func Serve(port uint16, handler handler) (*Server, error) {
 }
 
 func (s *Server) Close() error {
-	return nil
+	return s.listener.Close()
 }
 
 func (s *Server) listen() {
@@ -62,36 +60,14 @@ func (s *Server) handle(conn net.Conn) {
 
 	defer conn.Close()
 
-	request, err := request.RequestFromReader(conn)
 	headers := response.GetDefaultHeaders(0)
+	writer := response.NewWriter(conn)
+	request, err := request.RequestFromReader(conn)
 	if err != nil {
-		HErr := &HandlerError{
-			StatusCode: response.StatusBadRequest,
-			Message:    err.Error(),
-		}
-		HErr.Write(conn)
+		writer.ReturnResponse(response.StatusBadRequest, headers, []byte{})
 		return
 	}
 
-	writer := bytes.NewBuffer([]byte{})
-	res := s.handler(writer, request)
-	if res != nil {
-		res.Write(conn)
-		return
-	}
+	s.handler(writer, request)
 
-	headers.Replace("content-length", fmt.Sprintf("%d", len(writer.Bytes())))
-
-	response.WriteStatusLine(conn, response.StatusOK)
-	response.WriteHeaders(conn, headers)
-	conn.Write(writer.Bytes())
-
-}
-
-func (he *HandlerError) Write(w io.Writer) error {
-	h := response.GetDefaultHeaders(len(he.Message))
-	response.WriteStatusLine(w, response.StatusBadRequest)
-	response.WriteHeaders(w, h)
-	w.Write([]byte(he.Message))
-	return nil
 }
